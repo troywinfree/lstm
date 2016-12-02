@@ -265,17 +265,17 @@ class T_lstm :
         # initial guesses for the weights
         self.W = np.random.rand(4*self.m,self.n)
         self.U = np.random.rand(4*self.m,self.m)
-        self.b = np.random.rand(4*m)
+        self.b = np.random.rand(4*self.m)
 
     def _fiosch_call(self,xs,W,U,b) : 
         """
         Compute an exploded view of a call to the network
         
         Input
-        xs - 1d array of inputs
-        W - 1x4 array input parameter matrix
-        U - 1x4 array memory parameter matrix
-        b - 1x4 array bias parameter matrix
+        xs - ? x self.n array of inputs
+        W - 4*self.m x self.n array input parameter matrix
+        U - 4*self.m x self.m array memory parameter matrix
+        b - 4*self.mx4 array bias parameter matrix
         
         Output
         f - forget gate activation
