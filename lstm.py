@@ -14,7 +14,7 @@ from scipy.misc import derivative as n_der
 
 class Univariat_T_lstm : 
     """
-    Univariate lstm model for derivative testing
+    Univariate traditional lstm model for derivative testing
     """
     
     def __init__(self,h0,c0,sigma_g,sigma_c,sigma_h,seed=None) :
@@ -145,7 +145,7 @@ class Univariat_T_lstm :
         
     def analytic_derivative(self,xs,ys) :
         """
-        Compute the analytic derivative of the sum of squares loss functions
+        Compute the analytic derivative of the sum of squares loss function
         with respect to the weights using the chain rule
         
         Input
@@ -266,6 +266,15 @@ class T_lstm :
         self.W = np.random.rand(4*self.m,self.n)
         self.U = np.random.rand(4*self.m,self.m)
         self.b = np.random.rand(4*self.m)
+        
+        # row and column indices for the full derivative 
+        # matrices of f, i, o and s
+        self.W_i = np.array([np.array([self.n*[j] for j in range(self.m)]).flatten(),
+                             np.arange(self.n*self.m)])
+        self.U_i = np.array([np.array([self.m*[j] for j in range(self.m)]).flatten(),
+                             np.arange(self.m*self.m) + self.n*self.m])
+        self.b_i = np.array([[j,self.m*self.n+self.m*self.m+j] 
+                                            for j in range(self.m)]).T
 
     def _fiosch_call(self,xs,W,U,b) : 
         """
@@ -377,10 +386,83 @@ class T_lstm :
             return 0.5*np.sum(np.einsum('...i,...i',v,v))
    
         return n_der(funct,w,dw)
+    
+    def _h_c_dh_dw_dc_dw(self,_x,_h_tm1,c_tm1,dh_dw_tm1,dc_dw_tm1) : 
+        """
+        Compute the output, cell state and the derivative with respect to the 
+        weights
         
+        Input
+        _x - array of length self.n
+        _h_tm1 - previous time step output, length self.m array
+        c_tm1 - previous cell state, length self.m array
+        dh_dw_tm1 - the derivative of the previous output, (self.m x 4*n_w)
+                    array (where n_w = self.m*self.n+self.m*self.m+self.m, 
+                    which is the total number of weights in the neuron)
+        dc_dw_tm1 - the derivative of the previous cell state, 
+                    (self.m x 4*n_w) array
+        
+        Output
+        h - output, length self.m array
+        c - cell state, length self.m array
+        dh_dw - derivative of output, (self.m x 4*n_w) array
+        dc_dw - derivative of the cell state, (self.m x 4*n_w) array
+        """
+        
+        n_w = self.m*self.n+self.m*self.m+self.m
+        
+        W_i = self.W_i
+        U_i = self.U_i
+        b_i = self.b_i
+        
+        x = list(_x)
+        h_tm1 = list(_h_tm1)
+        
+        val = self.W.dot(x) + self.U.dot(h_tm1) + self.b
+            
+        f = self.sigma_g(val[:self.m])
+        i = self.sigma_g(val[self.m:2*self.m])
+        o = self.sigma_g(val[2*self.m:3*self.m])
+        s = self.sigma_c(val[3*self.m:])
+        
+        c = f*c_tm1 + i*s
+        h = o*self.sigma_h(c)
+        
+        df_dw = self.U[:self.m].dot(dh_dw_tm1)
+        df_dw[W_i[0],W_i[1]] += self.m*x
+        df_dw[U_i[0],U_i[1]] += self.m*h_tm1
+        df_dw[b_i[0],b_i[1]] += 1.
+        df_dw = self.sigma_g.deriv_diag(val[:self.m])[:,np.newaxis]*df_dw
+                                        
+        di_dw = self.U[self.m:2*self.m].dot(dh_dw_tm1)
+        di_dw[W_i[0],W_i[1]+n_w] += self.m*x
+        di_dw[U_i[0],U_i[1]+n_w] += self.m*h_tm1
+        di_dw[b_i[0],b_i[1]+n_w] += 1.
+        di_dw = self.sigma_g.deriv_diag(val[self.m:2*self.m])[:,np.newaxis]*di_dw
+                                        
+        do_dw = self.U[2*self.m:3*self.m].dot(dh_dw_tm1)
+        do_dw[W_i[0],W_i[1]+2*n_w] += self.m*x
+        do_dw[U_i[0],U_i[1]+2*n_w] += self.m*h_tm1
+        do_dw[b_i[0],b_i[1]+2*n_w] += 1.
+        do_dw = self.sigma_g.deriv_diag(val[2*self.m:3*self.m])[:,np.newaxis]*do_dw
+                            
+        ds_dw = self.U[3*self.m:].dot(dh_dw_tm1)
+        ds_dw[W_i[0],W_i[1]+3*n_w] += self.m*x
+        ds_dw[U_i[0],U_i[1]+3*n_w] += self.m*h_tm1
+        ds_dw[b_i[0],b_i[1]+3*n_w] += 1.
+        ds_dw = self.sigma_c.deriv_diag(val[3*self.m:])[:,np.newaxis]*ds_dw
+                                        
+        dc_dw = c_tm1[:,np.newaxis]*df_dw + f[:,np.newaxis]*dc_dw_tm1
+        dc_dw += s[:,np.newaxis]*di_dw + i[:,np.newaxis]*ds_dw
+
+        dh_dw = self.sigma_h(c)[:,np.newaxis]*do_dw
+        dh_dw += o[:,np.newaxis]*self.sigma_h.deriv_diag(c)[:,np.newaxis]*dc_dw
+
+        return [h,c,dh_dw,dc_dw]
+     
     def analytic_derivative(self,xs,ys) :
         """
-        Compute the analytic derivative of the sum of squares loss functions
+        Compute the analytic derivative of the sum of squares loss function
         with respect to the weights using the chain rule
         
         Input
@@ -399,75 +481,67 @@ class T_lstm :
         n_smpls = len(xs)
         n_w = self.m*self.n+self.m*self.m+self.m
         
-        h_tm1 = list(self.h0)
+        h_tm1 = self.h0
         c_tm1 = self.c0
         dc_dw_tm1 = np.zeros((self.m,4*n_w))
         dh_dw_tm1 = np.zeros((self.m,4*n_w))
         
         result = np.zeros(4*n_w)                                                    
-        
-        # compute the row and column indices for the full derivative
-        # matrices of f, i, o and s
-        W_i = np.array([np.array([self.n*[j] for j in range(self.m)]).flatten(),
-                        np.arange(self.n*self.m)])
-        U_i = np.array([np.array([self.m*[j] for j in range(self.m)]).flatten(),
-                        np.arange(self.m*self.m) + self.n*self.m])
-        b_i = np.array([[j,self.m*self.n+self.m*self.m+j] 
-                                            for j in range(self.m)]).T
-        
+
         # loop over the samples to collect the derivative with 
         # the chain rule
         for j in range(n_smpls) : 
             
-            x = list(xs[j])
-            
-            val = self.W.dot(x) + self.U.dot(h_tm1) + self.b
-            
-            f = self.sigma_g(val[:self.m])
-            i = self.sigma_g(val[self.m:2*self.m])
-            o = self.sigma_g(val[2*self.m:3*self.m])
-            s = self.sigma_c(val[3*self.m:])
-            
-            c = f*c_tm1 + i*s
-            h = o*self.sigma_h(c)
-            
-            df_dw = self.U[:self.m].dot(dh_dw_tm1)
-            df_dw[W_i[0],W_i[1]] += self.m*x
-            df_dw[U_i[0],U_i[1]] += self.m*h_tm1
-            df_dw[b_i[0],b_i[1]] += 1.
-            df_dw = self.sigma_g.deriv_diag(val[:self.m])[:,np.newaxis]*df_dw
-                                            
-            di_dw = self.U[self.m:2*self.m].dot(dh_dw_tm1)
-            di_dw[W_i[0],W_i[1]+n_w] += self.m*x
-            di_dw[U_i[0],U_i[1]+n_w] += self.m*h_tm1
-            di_dw[b_i[0],b_i[1]+n_w] += 1.
-            di_dw = self.sigma_g.deriv_diag(val[self.m:2*self.m])[:,np.newaxis]*di_dw
-                                            
-            do_dw = self.U[2*self.m:3*self.m].dot(dh_dw_tm1)
-            do_dw[W_i[0],W_i[1]+2*n_w] += self.m*x
-            do_dw[U_i[0],U_i[1]+2*n_w] += self.m*h_tm1
-            do_dw[b_i[0],b_i[1]+2*n_w] += 1.
-            do_dw = self.sigma_g.deriv_diag(val[2*self.m:3*self.m])[:,np.newaxis]*do_dw
-                                
-            ds_dw = self.U[3*self.m:].dot(dh_dw_tm1)
-            ds_dw[W_i[0],W_i[1]+3*n_w] += self.m*x
-            ds_dw[U_i[0],U_i[1]+3*n_w] += self.m*h_tm1
-            ds_dw[b_i[0],b_i[1]+3*n_w] += 1.
-            ds_dw = self.sigma_c.deriv_diag(val[3*self.m:])[:,np.newaxis]*ds_dw
-                                            
-            dc_dw = c_tm1[:,np.newaxis]*df_dw + f[:,np.newaxis]*dc_dw_tm1
-            dc_dw += s[:,np.newaxis]*di_dw + i[:,np.newaxis]*ds_dw
-
-            dh_dw = self.sigma_h(c)[:,np.newaxis]*do_dw
-            dh_dw += o[:,np.newaxis]*self.sigma_h.deriv_diag(c)[:,np.newaxis]*dc_dw
+            # compute h,c and the derivatives
+            (h,c,
+             dh_dw,
+             dc_dw) = self._h_c_dh_dw_dc_dw(xs[j],h_tm1,c_tm1,
+                                            dh_dw_tm1,dc_dw_tm1)
 
             result += (h - ys[j]).dot(dh_dw)
                                                         
-            h_tm1 = list(h)
+            h_tm1 = h
             c_tm1 = c
         
             dh_dw_tm1[:] = dh_dw
             dc_dw_tm1[:] = dc_dw
             
         return result
+        
+    def full_derivative(self,xs) :
+        """
+        Compute the full derivative of the neuron.
+        
+        Input
+        xs - ? x self.n array of sample inputs
+        
+        Output
+        D - ? x self.m x 4*n_w tensor full derivative
+        """
+        
+        n_smpls = len(xs)
+        
+        n_smpls = len(xs)
+        n_w = self.m*self.n+self.m*self.m+self.m
+        
+        D = np.zeros((n_smpls,self.m,4*n_w))
 
+        (h_tm1,
+         c_tm1,
+         D[0],
+         dc_dw_tm1) = self._h_c_dh_dw_dc_dw(xs[0],self.h0,self.c0,
+                                            np.zeros((self.m,4*n_w)),
+                                            np.zeros((self.m,4*n_w)))
+        
+        # loop over the samples to collect the derivative with 
+        # the chain rule
+        for j in range(1,n_smpls) : 
+            
+            # compute h,c and the derivatives
+            (h_tm1,
+             c_tm1,
+             D[j],
+             dc_dw_tm1) = self._h_c_dh_dw_dc_dw(xs[j],h_tm1,c_tm1,
+                                                D[j-1],dc_dw_tm1)
+         
+        return D 

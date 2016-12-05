@@ -21,7 +21,6 @@ class test_lstm(unittest.TestCase) :
     unit tests for lstm module
     """
     
-    
     def test_univariate_t_lstm(self) :
         """
         compare numerical and analytic derivatives of the univariate
@@ -61,12 +60,11 @@ class test_lstm(unittest.TestCase) :
                 
                 grad_i += 1
         
-    def test_multivariate_t_lstm(self) :
+    def test_multivariate_t_lstm_num_vs_analytic(self) :
         """
         compare numerical and analytic derivatives of the multivariate
         traditional lstm neuron
         """
-        
         
         EPSILON = 1E-3
         
@@ -108,6 +106,40 @@ class test_lstm(unittest.TestCase) :
                     
                     grad_i += 1
     
+    def test_multivariate_t_lstm_full_derivative(self) : 
+        """
+        compare analytic_derivative result to full derivative result
+        """
+        
+        EPSILON = 1E-12
+        
+        np.random.seed(0)
+        
+        k = 100
+        n = 20
+        m = 18
+        
+        xs = np.random.rand(k,n)
+        ys = np.random.rand(k,m)
+        
+        lstm = T_lstm(n,m,np.zeros(m),np.zeros(m),
+                      logistic(m),hyptan(m),identity(m),seed=0)
+     
+        # gradient of sum of squares loss
+        grad = lstm.analytic_derivative(xs,ys)
+
+        # full derivative tensor
+        D = lstm.full_derivative(xs)
+        
+        # gradient by multiplication by full derivative tensor
+        fd_grad = np.einsum('ij,ij...',(lstm(xs) - ys),D)
+        
+        # check the results
+        
+        v = grad - fd_grad
+        
+        self.assertLess(np.sqrt(v.dot(v)),EPSILON)
+                        
     def test_uni_vs_multi_t_lstm(self) :
         """
         compare evaluation and differentiate of univatiate and 
