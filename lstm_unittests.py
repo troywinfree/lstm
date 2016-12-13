@@ -18,7 +18,7 @@ from lstm import Univariat_T_lstm, T_lstm
 
 class test_lstm(unittest.TestCase) :
     """
-    unit tests for lstm module
+    unit tests for lstm
     """
     
     def test_univariate_t_lstm(self) :
@@ -40,7 +40,7 @@ class test_lstm(unittest.TestCase) :
                                 logistic(1),hyptan(1),identity(1),
                                 seed=0)
         
-        grad = lstm.analytic_derivative(xs,ys)
+        grad = lstm.ss_grad(xs,ys)
 
         grad_i = 0
         for i in range(3) : 
@@ -54,7 +54,7 @@ class test_lstm(unittest.TestCase) :
                 else : 
                     WW = lstm.b
                 
-                num_der = lstm.numerical_derivative(WW[i],1E-7,xs,ys,flag,i)
+                num_der = lstm.ss_numerical_derivative(WW[i],1E-7,xs,ys,flag,i)
                 
                 self.assertLess(np.fabs(num_der - grad[grad_i]),EPSILON)
                 
@@ -80,7 +80,7 @@ class test_lstm(unittest.TestCase) :
         lstm = T_lstm(n,m,np.zeros(m),np.zeros(m),
                       logistic(m),hyptan(m),identity(m),seed=0)
      
-        grad = lstm.analytic_derivative(xs,ys)
+        grad = lstm.ss_grad(xs,ys)
 
         grad_i = 0
         for i in range(3) : 
@@ -99,7 +99,7 @@ class test_lstm(unittest.TestCase) :
                         WW = lstm.b
                         coord = i*m + j
 
-                    num_der = lstm.numerical_derivative(WW[coord],1E-7,
+                    num_der = lstm.ss_numerical_derivative(WW[coord],1E-7,
                                                         xs,ys,flag,coord)
                     
                     self.assertLess(np.fabs(num_der - grad[grad_i]),EPSILON)
@@ -126,7 +126,7 @@ class test_lstm(unittest.TestCase) :
                       logistic(m),hyptan(m),identity(m),seed=0)
      
         # gradient of sum of squares loss
-        grad = lstm.analytic_derivative(xs,ys)
+        grad = lstm.ss_grad(xs,ys)
 
         # full derivative tensor
         D = lstm.full_derivative(xs)
@@ -166,13 +166,13 @@ class test_lstm(unittest.TestCase) :
         
         self.assertLess(np.sqrt(v.dot(v)),EPSILON)
 
-        U_grad = U_lstm.analytic_derivative(xs,ys)
-        grad = lstm.analytic_derivative(xs.reshape(k,1),ys.reshape(k,1))
+        U_grad = U_lstm.ss_grad(xs,ys)
+        grad = lstm.ss_grad(xs.reshape(k,1),ys.reshape(k,1))
         
         v = U_grad - grad
         
         self.assertLess(np.sqrt(v.dot(v)),EPSILON)
-
+        
 
 if __name__ == '__main__':
     unittest.main()

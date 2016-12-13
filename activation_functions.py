@@ -9,7 +9,6 @@ various activation functions
 """
 
 import numpy as np
-from scipy.sparse import diags
 
 
 class identity : 
@@ -46,7 +45,7 @@ class identity :
             raise ValueError
             
         return np.ones(self.n)
-
+        
 
 class logistic : 
     
@@ -70,7 +69,7 @@ class logistic :
             raise ValueError
      
         return np.reciprocal(1. + np.exp(-x))
-        
+            
     def deriv_diag(self,x) : 
         """
         Evaluate the derivative
@@ -108,7 +107,7 @@ class hyptan :
             raise ValueError
      
         return np.tanh(x)
-        
+           
     def deriv_diag(self,x) : 
         """
         Evaluate the derivative

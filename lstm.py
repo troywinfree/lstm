@@ -106,7 +106,7 @@ class Univariat_T_lstm :
         
         return self._fiosch_call(xs,self.W,self.U,self.b)[-1]
 
-    def numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
+    def ss_numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
         """
         Numerically compute the derivative of the sum of squares loss function
         using finite differences
@@ -143,7 +143,7 @@ class Univariat_T_lstm :
 
         return n_der(funct,w,dw)
         
-    def analytic_derivative(self,xs,ys) :
+    def ss_grad(self,xs,ys) :
         """
         Compute the analytic derivative of the sum of squares loss function
         with respect to the weights using the chain rule
@@ -227,7 +227,7 @@ class T_lstm :
                  sigma_g,
                  sigma_c,
                  sigma_h,
-                 seed = None,
+                 seed = None
                  ) :
         """
         T_lstm initializer
@@ -338,7 +338,7 @@ class T_lstm :
         
         return self._fiosch_call(xs,self.W,self.U,self.b)[-1]
 
-    def numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
+    def ss_numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
         """
         Numerically compute the derivative of the sum of squares loss function
         using finite differences
@@ -460,7 +460,7 @@ class T_lstm :
 
         return [h,c,dh_dw,dc_dw]
      
-    def analytic_derivative(self,xs,ys) :
+    def ss_grad(self,xs,ys) :
         """
         Compute the analytic derivative of the sum of squares loss function
         with respect to the weights using the chain rule
