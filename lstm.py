@@ -1,547 +1,513 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Nov 19 19:26:01 2016
-
 @author: troywinfree
 
-lstm neural networks
+lstm networks implemented with theano
 """
 
 import numpy as np
-from scipy.misc import derivative as n_der
+from scipy.optimize import minimize
+
+import theano
+from theano import tensor as T
+
+floatX=theano.config.floatX
+
+# activation functions
+sigma_g = T.nnet.sigmoid
+sigma_c = T.tanh
+sigma_h = lambda x : x
 
 
-class Univariat_T_lstm : 
-    """
-    Univariate traditional lstm model for derivative testing
+def lstm_neuron(x_t,c_tm1,h_tm1,W,U,b,n,m) :
+    """ Computes the output of a single lstm neuron. See
+    
+        https://en.wikipedia.org/wiki/Long_short-term_memory
+    
+        Input
+        
+        x_t    - input vector of dimension at least n
+        c_tm1  - previous cell output vector, should be dimension at least m
+        h_tm1  - previous neuron output vector, at least dimension m
+        W      - the four weight matrices for x_t stacked on top of each other
+                 (in the order, from top to bottom, forget, intput, output, and
+                 cell), should have dimension at least 4*m x n
+        U      - the four weight matrices for h_tm1 stacked on top of each 
+                 other (same order as W), should have dimension at least 4*m x m
+        b      - the bias weight vectors again stacked on top of each other,
+                 should have dimension at least 4*m
+        n      - dimension of the lstm input
+        m      - dimension of the lstm output
+        
+        Output
+        
+        c      - cell state
+        h      - output
     """
     
-    def __init__(self,h0,c0,sigma_g,sigma_c,sigma_h,seed=None) :
-        """
-        U_lstm initializer
-        
-        h0 - initial output (float)
-        c0 - initial cell state (float)
-        sigma_g - remembering, aquiring and output candidate activation 
-                  functions (R->R)
-        sigma_c - cell state activation function (R->R)
-        sigma_h - output activation function (R->R)
-        seed - seed for random fills of W,U,b parameters arrays
-        """
-        
-        self.h0 = h0
-        self.c0 = c0
-        self.sigma_g = sigma_g
-        self.sigma_c = sigma_c
-        self.sigma_h = sigma_h
-        self.seed = seed
-        
-        if self.seed is not None:
-            np.random.seed(self.seed)
+    # do the linear algebra
+    Wx_p_Ux_p_b = W[:4*m,:n].dot(x_t[:n]) + U[:4*m,:m].dot(h_tm1[:m]) + b[:4*m]
 
-        self.W = np.random.rand(4)
-        self.U = np.random.rand(4)
-        self.b = np.random.rand(4)
-     
-    def _fiosch_call(self,xs,W,U,b) : 
-        """
-        Compute an exploded view of a call to the network
-        
-        Input
-        xs - 1d array of inputs
-        W - 1x4 array input parameter matrix
-        U - 1x4 array memory parameter matrix
-        b - 1x4 array bias parameter matrix
-        
-        Output
-        f - forget gate activation
-        i - input gate activation
-        o - output gate activation
-        s - cell state activation
-        c - cell state
-        h - output
-        """
-        
-        n = len(xs)
-        
-        h = np.zeros(n)
-        c = np.zeros(n)
-        
-        f = np.zeros(n)
-        i = np.zeros(n)
-        o = np.zeros(n)
-        s = np.zeros(n)
-        
-        h_tm1 = self.h0
-        c_tm1 = self.c0
-        
-        for j in range(n) : 
-            
-            val = xs[j]*W + h_tm1*U + b
-        
-            f[j] = self.sigma_g(np.array([val[0]]))[0]
-            i[j] = self.sigma_g(np.array([val[1]]))[0]
-            o[j] = self.sigma_g(np.array([val[2]]))[0]
-            s[j] = self.sigma_c(np.array([val[3]]))[0]
-            
-            c[j] = f[j]*c_tm1 + i[j]*s[j]
-            h[j] = o[j]*self.sigma_h(np.array([c[j]]))[0]
-            
-            h_tm1 = h[j]
-            c_tm1 = c[j]
-        
-        return [f,i,o,s,c,h]
-        
-    def __call__(self,xs) :
-        """
-        call the neuron with an array of inputs
-        
-        Input
-        xs - 1d array of inputs
-        
-        Output
-        h - 1d array of output
-        """
-        
-        return self._fiosch_call(xs,self.W,self.U,self.b)[-1]
+    # compute the activations
+    f = sigma_g(Wx_p_Ux_p_b[:m])
+    i = sigma_g(Wx_p_Ux_p_b[m:2*m])
+    o = sigma_g(Wx_p_Ux_p_b[2*m:3*m])
+    s = sigma_c(Wx_p_Ux_p_b[3*m:])
 
-    def ss_numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
-        """
-        Numerically compute the derivative of the sum of squares loss function
-        using finite differences
-        
-        Input
-        w - the value of the weight at which to compute the derivative
-        dw - the size of the finite difference step
-        xs - 1d array of sample inputs
-        ys - 1d array of sample outputs
-        WUb_flag - string in ['W', 'U', 'b'] indicating which parameter group
-                   with respect to which the derivative should be computed
-        coord - index into the parameter group array
-        
-        Output
-        Numerical derivative at w of requested coordinate of the loss function
-        """
-         
-        def funct(ww) : 
-            
-            W = np.array(self.W)
-            U = np.array(self.U)
-            b = np.array(self.b)
-            
-            if WUb_flag == 'W' : 
-                W[coord] = ww
-            elif WUb_flag == 'U' :
-                U[coord] = ww 
-            else : 
-                b[coord] = ww
-
-            f,i,o,s,c,h = self._fiosch_call(xs,W,U,b)
-
-            return 0.5*np.sum((h - ys)**2)
-
-        return n_der(funct,w,dw)
-        
-    def ss_grad(self,xs,ys) :
-        """
-        Compute the analytic derivative of the sum of squares loss function
-        with respect to the weights using the chain rule
-        
-        Input
-        xs - 1d array of sample inputs
-        ys - 1d array of sample outputs
-        
-        Output
-        1x12 gradient matrix organized as 
-            [W_f, U_f, b_f, W_i, U_i, b_i, W_o, U_o, f_o, W_c, U_c, f_c]
-        """
-        
-        n = len(xs)
-        
-        h_tm1 = self.h0
-        c_tm1 = self.c0
-        dc_dw_tm1 = np.zeros(12)
-        dh_dw_tm1 = np.zeros(12)
-        
-        result = np.zeros(12)
-        
-        for j in range(n) : 
-            
-            val = xs[j]*self.W + h_tm1*self.U + self.b
-
-            f = self.sigma_g(np.array([val[0]]))[0]
-            i = self.sigma_g(np.array([val[1]]))[0]
-            o = self.sigma_g(np.array([val[2]]))[0]
-            s = self.sigma_c(np.array([val[3]]))[0]
-            
-            c = f*c_tm1 + i*s
-            h = o*self.sigma_h(np.array([c]))[0]
-            
-            df_dw = self.U[0]*dh_dw_tm1
-            df_dw += np.array([xs[j], h_tm1, 1.] + 9*[0.])
-            df_dw *= self.sigma_g.deriv_diag(np.array([val[0]]))[0]
-                                                      
-            di_dw = self.U[1]*dh_dw_tm1
-            di_dw += np.array(3*[0.]+[xs[j], h_tm1, 1.]+6*[0.])
-            di_dw *= self.sigma_g.deriv_diag(np.array([val[1]]))[0]
-                                                      
-            do_dw = self.U[2]*dh_dw_tm1
-            do_dw += np.array(6*[0.]+[xs[j], h_tm1, 1.]+3*[0.])
-            do_dw *= self.sigma_g.deriv_diag(np.array([val[2]]))[0]
-                                             
-            ds_dw = self.U[3]*dh_dw_tm1
-            ds_dw += np.array(9*[0.]+[xs[j], h_tm1, 1.])
-            ds_dw *= self.sigma_c.deriv_diag(np.array([val[3]]))[0]
-                                         
-            dc_dw = c_tm1*df_dw + f*dc_dw_tm1
-            dc_dw += s*di_dw + i*ds_dw
-                
-            dh_dw = self.sigma_h(np.array([c]))[0]*do_dw
-            dh_dw += o*self.sigma_h.deriv_diag(np.array([c]))[0]*dc_dw
-                                                        
-            result += (h - ys[j])*dh_dw
-                                                        
-            h_tm1 = h
-            c_tm1 = c
-        
-            dh_dw_tm1 = dh_dw
-            dc_dw_tm1 = dc_dw
-            
-        return result
-            
-
-class T_lstm : 
-    """
-    Traditional lstm networks
+    # compute the cell state
+    c = T.zeros_like(c_tm1)
+    c = T.set_subtensor(c[:m],f*c_tm1[:m] + i*s)
     
-    see https://en.wikipedia.org/wiki/Long_short-term_memory
-    and http://colah.github.io/posts/2015-08-Understanding-LSTMs/
+    # compute the output
+    h = T.zeros_like(h_tm1)
+    h = T.set_subtensor(h[:m],o*sigma_h(c[:m]))
+    
+    return c,h
+
+    
+def lstm_layer(W,U,b,c0,h0,n,m,x) : 
+    """ Build a recursive layer of lstm neurons
+    
+        Input
+        
+        W      - the four weight matrices for x_t stacked on top of each other
+                 (in the order, from top to bottom, forget, intput, output, and
+                 cell), should have dimension at least 4*m x n
+        U      - the four weight matrices for h_tm1 stacked on top of each 
+                 other (same order as W), should have dimension at least 4*m x m
+        b      - the bias weight vectors again stacked on top of each other,
+                 should have dimension at least 4*m
+        c0     - initial cell state vector, at least dimension m 
+        h0     - initial output vector, at least dimension m
+        n      - dimension of the lstm input
+        m      - dimension of the lstm output
+        x      - matrix of inputs, number of columns at least n
+        
+        Output
+        
+        uncompiled theano symbolic representation of the lstm layer
+    
+    """
+    
+    result,_ = theano.scan(lstm_neuron,
+                           sequences = [x],
+                           outputs_info = [c0,h0],
+                           non_sequences = [W,U,b,n,m])
+    
+    return result[1]
+
+
+def compute_mean_log_lklyhd_outputs(X,Y,Ws,Us,bs,c0s,h0s,ns,ms) : 
+    """ Builds theano symbolic representation of the mean log likelyhood
+        loss function.
+        
+        The weight matrices and bias vectors are padded with zeros
+        
+        • Ws has dimension ? x 4*max(ms) x max(nx)
+        • Us has dimension ? x 4*max(ms) x max(ms)
+        • bs has dimension ? x 4*max(ms)
+        
+        The input tensor X is also padded with zeros
+        
+        • X has dimension ? x ?? x max(max(ms),max(ns))
+        
+        Input
+    
+        X    - domain inputs as 3D tensor
+        Y    - range outputs as 3D tensor
+        Ws   - input weight matrices as 3D tensor (one matrix per layer)
+        Us   - previous output weight matrices as 3D tensor
+        bs   - bias vectors as matrix
+        c0s  - initial cell state vectors as matrix
+        h0s  - initial neuron output vectors as matrix
+        ns   - input dimensions for each layer
+        ms   - ouput dimensions for each layer
+        
+        Output
+        
+        uncompiled symbolic theano representation of mean log likelyhood loss
+    """
+    
+    # the function to scan over - it just collects the log likelyhood of 
+    # the positions indicated by y given x and the weight matrices
+    def scan_f(x,y,W,U,b,c0,h0,n,m) : 
+        
+        outs,_ = theano.scan(lstm_layer,
+                             sequences = [W,U,b,c0,h0,n,m],
+                             outputs_info = [x])
+        
+        # y is zero except for one one in each row so it's ok to
+        # multiply then sum then take the log
+        return T.log(T.sum(outs[-1][:,:m[-1]]*y,axis=1)) 
+    
+    batch_outputs,_ = theano.scan(scan_f,
+                                  sequences = [X,Y],
+                                  non_sequences = [Ws,Us,bs,c0s,h0s,ns,ms])
+    
+    return T.mean(batch_outputs)
+
+    
+def compute_mean_squared_outputs(X,Y,Ws,Us,bs,c0s,h0s,ns,ms) : 
+    """ Builds theano symbolic representation of the mean squared
+        loss function 
+        
+        The weight matrices and bias vectors are padded with zeros
+        
+        • Ws has dimension ? x 4*max(ms) x max(nx)
+        • Us has dimension ? x 4*max(ms) x max(ms)
+        • bs has dimension ? x 4*max(ms)
+        • c0s has dimension ? x max(ms)
+        • h0s has dimension ? x max(ms)
+        
+        The input tensor X is also padded with zeros
+        
+        • X has dimension ? x ?? x max(max(ms),max(ns))
+        
+        Input
+    
+        X    - domain inputs as 3D tensor
+        Y    - range outputs as 3D tensor
+        Ws   - input weight matrices as 3D tensor (one matrix per layer)
+        Us   - previous output weight matrices as 3D tensor
+        bs   - bias vectors as matrix
+        c0s  - initial cell state vectors as matrix
+        h0s  - initial neuron output vectors as matrix
+        ns   - input dimensions for each layer
+        ms   - ouput dimensions for each layer
+        
+        Output
+        
+        uncompiled symbolic theano representation of mean squared loss
+    """
+    
+    # the function to scan over
+    def scan_f(x,y,W,U,b,c0,h0,n,m) : 
+        
+        outs,_ = theano.scan(lstm_layer,
+                             sequences = [W,U,b,c0,h0,n,m],
+                             outputs_info = [x])
+        
+        return T.sum((outs[-1][:,:m[-1]] - y)**2,axis=1)
+    
+    batch_outputs,_ = theano.scan(scan_f,
+                                  sequences = [X,Y],
+                                  non_sequences = [Ws,Us,bs,c0s,h0s,ns,ms])
+    
+    return T.mean(batch_outputs)
+    
+
+class lstm_model : 
+    """ LSTM neural neetwork. See
+        
+        https://en.wikipedia.org/wiki/Long_short-term_memory
+        
+        or
+        
+        http://colah.github.io/posts/2015-08-Understanding-LSTMs/
+        
+        It is likely that I am overdoing it with the theano.scan function
     """
     
     def __init__(self,
-                 n,
-                 m,
-                 h0,
-                 c0,
-                 sigma_g,
-                 sigma_c,
-                 sigma_h,
-                 seed = None
-                 ) :
-        """
-        T_lstm initializer
+                 ns,
+                 ms,
+                 seed = None,
+                 c0s = None,
+                 h0s = None
+                 ) : 
+        """ Model initializer
         
-        n - dimension of input
-        m - dimension of output
-        h0 - length m array
-        c0 - length m array
-        sigma_g - remembering, aquiring and output candidate activation 
-                  functions (R^m->R^m)
-        sigma_c - cell state activation function (R^m->R^m)
-        sigma_h - output activation function (R^m->R^m)
-        seed - seed for random fills of W,U,b parameters arrays
-        """
-        
-        self.n = n
-        self.m = m
-        self.h0 = h0.copy()
-        self.c0 = c0.copy()
-        self.sigma_g = sigma_g
-        self.sigma_c = sigma_c
-        self.sigma_h = sigma_h
-        self.seed = seed
+            When provided, c0s and h0s need to be padded with zeros
                 
-        # the previous output
-        self.h = np.zeros(self.m)
+            • c0s has dimension len(ns) x max(ms)
+            • h0s has dimension len(ns) x max(ms)
+            
+            note also that len(ns) == len(ms)
         
-        # the previous cell state
-        self.c = np.zeros(self.m)
+            Inputs
+            
+            ns   - input dimensions for each layer
+            ms   - ouput dimensions for each layer
+            seed - seed for random initialization of weight matrices
+            c0s  - optional initial cell state vectors as matrix
+            h0s  - optional initial neuron output vectors as matrix    
+        """
         
+        n_layers = len(ns)
+        assert n_layers == len(ms)
+        
+        assert False not in (ns[1:] == ms[:-1])
+        
+        self.n_layers = n_layers
+        
+        self.seed = seed
+
         # seed the random generator if requested
-        if self.seed is not None :
-            np.random.seed(self.seed)
+        if seed is not None : 
+            np.random.seed(seed)
         
-        # initial guesses for the weights
-        self.W = np.random.rand(4*self.m,self.n)
-        self.U = np.random.rand(4*self.m,self.m)
-        self.b = np.random.rand(4*self.m)
-        
-        # row and column indices for the full derivative 
-        # matrices of f, i, o and s
-        self.W_i = np.array([np.array([self.n*[j] for j in range(self.m)]).flatten(),
-                             np.arange(self.n*self.m)])
-        self.U_i = np.array([np.array([self.m*[j] for j in range(self.m)]).flatten(),
-                             np.arange(self.m*self.m) + self.n*self.m])
-        self.b_i = np.array([[j,self.m*self.n+self.m*self.m+j] 
-                                            for j in range(self.m)]).T
-
-    def _fiosch_call(self,xs,W,U,b) : 
-        """
-        Compute an exploded view of a call to the network
-        
-        Input
-        xs - ? x self.n array of inputs
-        W - 4*self.m x self.n array input parameter matrix
-        U - 4*self.m x self.m array memory parameter matrix
-        b - 4*self.mx4 array bias parameter matrix
-        
-        Output
-        f - forget gate activation
-        i - input gate activation
-        o - output gate activation
-        s - cell state activation
-        c - cell state
-        h - output
-        """
-        
-        n_smpls = len(xs)
-        
-        h = np.zeros((n_smpls,self.m))
-        c = np.zeros((n_smpls,self.m))
-        
-        f = np.zeros((n_smpls,self.m))
-        i = np.zeros((n_smpls,self.m))
-        o = np.zeros((n_smpls,self.m))
-        s = np.zeros((n_smpls,self.m))
-
-        h_tm1 = self.h0
-        c_tm1 = self.c0
-        
-        for j in range(n_smpls) : 
+        # we are padding everything with zeros so we need the max
+        # input and output dimensions - padding was the only way I 
+        # could manage to pass varying sized weight matrices to 
+        # theano's scan function
+        self.max_n = np.max(ns)
+        self.max_m = np.max(ms)
             
-            val = W.dot(xs[j]) + U.dot(h_tm1) + b
-                        
-            f[j] = self.sigma_g(val[:self.m])
-            i[j] = self.sigma_g(val[self.m:2*self.m])
-            o[j] = self.sigma_g(val[2*self.m:3*self.m])
-            s[j] = self.sigma_c(val[3*self.m:])
-            
-            c[j] = f[j]*c_tm1 + i[j]*s[j]
-            h[j] = o[j]*self.sigma_h(c[j])
-            
-            h_tm1 = h[j]
-            c_tm1 = c[j]
-
-        return [f,i,o,s,c,h]
-        
-    def __call__(self,xs) :
-        """
-        call the neuron with an array of inputs
-        
-        Input
-        xs - (? x self.n) array of inputs
-        
-        Output
-        h - (? x self.m) array of output
-        """
-        
-        return self._fiosch_call(xs,self.W,self.U,self.b)[-1]
-
-    def ss_numerical_derivative(self,w,dw,xs,ys,WUb_flag,coord) : 
-        """
-        Numerically compute the derivative of the sum of squares loss function
-        using finite differences
-        
-        Input
-        w - the value of the weight at which to compute the derivative
-        dw - the size of the finite difference step
-        xs - ? x self.n array of sample inputs
-        ys - ? x self.m array of sample outputs
-        WUb_flag - string in ['W', 'U', 'b'] indicating which parameter group
-                   with respect to which the derivative should be computed
-        coord - index into the parameter group array: should be 2 dimensional
-                if WUb_flag is 'W' or 'U', and 1 dimensional if WUb_flag is 'b'
-        
-        Output
-        Numerical derivative at w of requested coordinate of the loss function
-        """
-        
-        # make sure coord has the right dimension
-        
-        if WUb_flag in ['W', 'U'] : 
-            assert len(coord) == 2, "Coord should be length 2"
-        elif WUb_flag == 'b' : 
-            assert type(coord) == int, "Coord should be int"
+        # collect c0 and h0
+        if c0s is None : 
+            self.c0s = theano.shared(np.zeros((self.n_layers,
+                                              self.max_m)),name='c0s')
         else : 
-            raise ValueError("WUb_flag should be in ['W', 'U', 'b']")
-
-        def funct(ww) : 
+            # check input
+            assert c0s.shape == (self.n_layers,self.max_m)
             
-            W = np.array(self.W)
-            U = np.array(self.U)
-            b = np.array(self.b)
-            
-            if WUb_flag == 'W' : 
-                W[coord] = ww
-            elif WUb_flag == 'U' :
-                U[coord] = ww 
-            else : 
-                b[coord] = ww
-
-            f,i,o,s,c,h = self._fiosch_call(xs,W,U,b)
-
-            v = h - ys
-            
-            return 0.5*np.sum(np.einsum('...i,...i',v,v))
-   
-        return n_der(funct,w,dw)
-    
-    def _h_c_dh_dw_dc_dw(self,_x,_h_tm1,c_tm1,dh_dw_tm1,dc_dw_tm1) : 
-        """
-        Compute the output, cell state and the derivative with respect to the 
-        weights
+            self.c0s = theano.shared(np.array(c0s),name='c0')
+        if h0s is None : 
+            self.h0s = theano.shared(np.zeros((self.n_layers,
+                                              self.max_m)),name='h0s')
+        else : 
+            # check input
+            assert h0s.shape == (self.n_layers,self.max_m)
+            self.h0s = theano.shared(np.array(h0s),name='h0')
+              
+        # weights
+        Ws = np.zeros((self.n_layers,4*self.max_m,self.max_n))
+        Us = np.zeros((self.n_layers,4*self.max_m,self.max_m))
+        bs = np.zeros((self.n_layers,4*self.max_m))
         
-        Input
-        _x - array of length self.n
-        _h_tm1 - previous time step output, length self.m array
-        c_tm1 - previous cell state, length self.m array
-        dh_dw_tm1 - the derivative of the previous output, (self.m x 4*n_w)
-                    array (where n_w = self.m*self.n+self.m*self.m+self.m, 
-                    which is the total number of weights in the neuron)
-        dc_dw_tm1 - the derivative of the previous cell state, 
-                    (self.m x 4*n_w) array
+        # we are paadding with zeros
+        for i in range(self.n_layers) : 
+            Ws[i,:4*ms[i],:ns[i]] = np.random.rand(4*ms[i],ns[i])
+            Us[i,:4*ms[i],:ms[i]] = np.random.rand(4*ms[i],ms[i])
+            bs[i,:4*ms[i]] = np.random.rand(4*ms[i])
         
-        Output
-        h - output, length self.m array
-        c - cell state, length self.m array
-        dh_dw - derivative of output, (self.m x 4*n_w) array
-        dc_dw - derivative of the cell state, (self.m x 4*n_w) array
-        """
+        # set the shared variables
+        self.Ws = theano.shared(Ws,name='Ws')
+        self.Us = theano.shared(Us,name='Us')
+        self.bs = theano.shared(bs,name='bs')
         
-        n_w = self.m*self.n+self.m*self.m+self.m
-        
-        W_i = self.W_i
-        U_i = self.U_i
-        b_i = self.b_i
-        
-        x = list(_x)
-        h_tm1 = list(_h_tm1)
-        
-        val = self.W.dot(x) + self.U.dot(h_tm1) + self.b
-            
-        f = self.sigma_g(val[:self.m])
-        i = self.sigma_g(val[self.m:2*self.m])
-        o = self.sigma_g(val[2*self.m:3*self.m])
-        s = self.sigma_c(val[3*self.m:])
-        
-        c = f*c_tm1 + i*s
-        h = o*self.sigma_h(c)
-        
-        df_dw = self.U[:self.m].dot(dh_dw_tm1)
-        df_dw[W_i[0],W_i[1]] += self.m*x
-        df_dw[U_i[0],U_i[1]] += self.m*h_tm1
-        df_dw[b_i[0],b_i[1]] += 1.
-        df_dw = self.sigma_g.deriv_diag(val[:self.m])[:,np.newaxis]*df_dw
-                                        
-        di_dw = self.U[self.m:2*self.m].dot(dh_dw_tm1)
-        di_dw[W_i[0],W_i[1]+n_w] += self.m*x
-        di_dw[U_i[0],U_i[1]+n_w] += self.m*h_tm1
-        di_dw[b_i[0],b_i[1]+n_w] += 1.
-        di_dw = self.sigma_g.deriv_diag(val[self.m:2*self.m])[:,np.newaxis]*di_dw
-                                        
-        do_dw = self.U[2*self.m:3*self.m].dot(dh_dw_tm1)
-        do_dw[W_i[0],W_i[1]+2*n_w] += self.m*x
-        do_dw[U_i[0],U_i[1]+2*n_w] += self.m*h_tm1
-        do_dw[b_i[0],b_i[1]+2*n_w] += 1.
-        do_dw = self.sigma_g.deriv_diag(val[2*self.m:3*self.m])[:,np.newaxis]*do_dw
-                            
-        ds_dw = self.U[3*self.m:].dot(dh_dw_tm1)
-        ds_dw[W_i[0],W_i[1]+3*n_w] += self.m*x
-        ds_dw[U_i[0],U_i[1]+3*n_w] += self.m*h_tm1
-        ds_dw[b_i[0],b_i[1]+3*n_w] += 1.
-        ds_dw = self.sigma_c.deriv_diag(val[3*self.m:])[:,np.newaxis]*ds_dw
-                                        
-        dc_dw = c_tm1[:,np.newaxis]*df_dw + f[:,np.newaxis]*dc_dw_tm1
-        dc_dw += s[:,np.newaxis]*di_dw + i[:,np.newaxis]*ds_dw
-
-        dh_dw = self.sigma_h(c)[:,np.newaxis]*do_dw
-        dh_dw += o[:,np.newaxis]*self.sigma_h.deriv_diag(c)[:,np.newaxis]*dc_dw
-
-        return [h,c,dh_dw,dc_dw]
-     
-    def ss_grad(self,xs,ys) :
-        """
-        Compute the analytic derivative of the sum of squares loss function
-        with respect to the weights using the chain rule
-        
-        Input
-        xs - ? x self.n array of sample inputs
-        ys - ? x self.m array of sample outputs
-        
-        Output
-        1 x 4*(self.m*self.n + self.m*self.m + self.m) gradient matrix 
-        organized as 
-            [W_f, U_f, b_f, W_i, U_i, b_i, W_o, U_o, f_o, W_c, U_c, f_c]
-        where if we are thinking of the W and U parameters as 2 dimensional 
-        matrices then the above scheme referes to these matrices flattened 
-        row first
-        """
-        
-        n_smpls = len(xs)
-        n_w = self.m*self.n+self.m*self.m+self.m
-        
-        h_tm1 = self.h0
-        c_tm1 = self.c0
-        dc_dw_tm1 = np.zeros((self.m,4*n_w))
-        dh_dw_tm1 = np.zeros((self.m,4*n_w))
-        
-        result = np.zeros(4*n_w)                                                    
-
-        # loop over the samples to collect the derivative with 
-        # the chain rule
-        for j in range(n_smpls) : 
-            
-            # compute h,c and the derivatives
-            (h,c,
-             dh_dw,
-             dc_dw) = self._h_c_dh_dw_dc_dw(xs[j],h_tm1,c_tm1,
-                                            dh_dw_tm1,dc_dw_tm1)
-
-            result += (h - ys[j]).dot(dh_dw)
-                                                        
-            h_tm1 = h
-            c_tm1 = c
-        
-            dh_dw_tm1[:] = dh_dw
-            dc_dw_tm1[:] = dc_dw
-            
-        return result
-        
-    def full_derivative(self,xs) :
-        """
-        Compute the full derivative of the neuron.
-        
-        Input
-        xs - ? x self.n array of sample inputs
-        
-        Output
-        D - ? x self.m x 4*n_w tensor full derivative
-        """
-        
-        n_smpls = len(xs)
-        
-        n_smpls = len(xs)
-        n_w = self.m*self.n+self.m*self.m+self.m
-        
-        D = np.zeros((n_smpls,self.m,4*n_w))
-
-        (h_tm1,
-         c_tm1,
-         D[0],
-         dc_dw_tm1) = self._h_c_dh_dw_dc_dw(xs[0],self.h0,self.c0,
-                                            np.zeros((self.m,4*n_w)),
-                                            np.zeros((self.m,4*n_w)))
-        
-        # loop over the samples to collect the derivative with 
-        # the chain rule
-        for j in range(1,n_smpls) : 
-            
-            # compute h,c and the derivatives
-            (h_tm1,
-             c_tm1,
-             D[j],
-             dc_dw_tm1) = self._h_c_dh_dw_dc_dw(xs[j],h_tm1,c_tm1,
-                                                D[j-1],dc_dw_tm1)
+        # input and output dimensions
+        self.ms = theano.shared(ms,name='ms')
+        self.ns = theano.shared(ns,name='ns')
          
-        return D 
+        # compute the network
+        self._compute_network_model()
+        
+    def _compute_network_model(self) : 
+        """ Build the network, loss, grad_loss and sgd_update theano functions.
+            More work than is strictly nessecary is done here as the only thing
+            that is really needed in order to run sgd (stochastic gradient 
+            descent) is the sgd_update function. The network, loss and grad_loss
+            functions are compiled since this is experimental code.
+        """
+        
+        # build the network
+        self.x = T.matrix('x',dtype = floatX)
+
+        self.network_outputs,_ = theano.scan(lstm_layer,
+                                             sequences = [self.Ws,
+                                                          self.Us,
+                                                          self.bs,
+                                                          self.c0s,
+                                                          self.h0s,
+                                                          self.ns,
+                                                          self.ms],
+                                             outputs_info = [self.x])
+
+        # build mean squared loss
+        
+        # the samples are provided as a tensor to support batching of SGD
+        self.X = T.tensor3('X',dtype = floatX)
+        self.Y = T.tensor3('Y',dtype = floatX)
+        
+        self.loss_outputs = compute_mean_squared_outputs(self.X,self.Y,
+                                                         self.Ws,self.Us,
+                                                         self.bs,self.c0s,
+                                                         self.h0s,self.ns,
+                                                         self.ms)
+      
+        # get the gradient of the loss
+        
+        (self.dWs,
+         self.dUs,
+         self.dbs) = theano.grad(self.loss_outputs,
+                                 [self.Ws,self.Us,self.bs])
+
+        # get the sgd updates
+        
+        # this is the learning parameter
+        self.eta = T.scalar('eta',dtype = floatX)
+        
+        self.sgd_updates = ((self.Ws,self.Ws - self.eta*self.dWs),
+                            (self.Us,self.Us - self.eta*self.dUs),
+                            (self.bs,self.bs - self.eta*self.dbs))
+        
+        # set functions to None
+        self.network = None
+        self.loss = None
+        self.grad_loss = None
+        self.sgd_update = None
+
+    def compile_network(self) : 
+        """ Compile the network
+        """
+        
+        if self.network is not None : 
+            return
+        
+        # note that the return from this is the outputs from each layer
+        # also x must have column dimension max(self.max_n,self.max_m)
+        self.network = theano.function(inputs = [self.x],
+                                       outputs = self.network_outputs)
+        
+    def compile_loss(self) : 
+        """ Compile mse loss
+        """
+        
+        if self.loss is not None : 
+            return
+        
+        self.loss = theano.function(inputs = [self.X,self.Y],
+                                    outputs = self.loss_outputs)
+        
+    def compile_grad_loss(self) : 
+        """ Compile the gradient of the loss
+        """
+        
+        if self.grad_loss is not None : 
+            return
+        
+        self.grad_loss = theano.function(inputs = [self.X,self.Y],
+                                         outputs = [self.dWs,
+                                                    self.dUs,
+                                                    self.dbs])
+        
+    def compile_sgd_update(self) : 
+        """ Compile the SGD update
+        """
+        
+        if self.sgd_update is not None : 
+            return
+        
+        # note that this returns the PREVIOUS loss value - using 
+        # the weights before the update
+        self.sgd_update = theano.function(inputs = [self.X,self.Y,self.eta],
+                                          outputs = [self.loss_outputs],
+                                          updates = self.sgd_updates)
+        
+        
+    def batch_optimize(self,_X,_Y,tol = 1E-5) : 
+        """ Optimize the model using BFGS. This is only for toy problems and 
+            serves as a reality check on stochastic gradient descent
+            
+            Input
+            
+            _X       - 3D tensor of domain samples
+            _Y       - 3D tensor of range samples
+            tol      - tolerance for the optimizer
+            
+            Output
+            
+            opt_res  - optimization result from the scipy's minimize function
+            Ws_opt   - optimal input weights tensor weights
+            Us_opt   - optimal previous output weights tensor weights
+            bs_opt   - optimal bias weights matrix weights
+        """
+        
+        # set up the theano functions for evaluating the objective and jacobian
+        # for the optimization - if I was a bit more serious about this code
+        # I would factor this out as it is lengthy, but since it is just 
+        # validation code I have left it as-is
+        
+        Ws = T.tensor3('Ws_bo',dtype = floatX)
+        Us = T.tensor3('Us_bo',dtype = floatX)
+        bs = T.matrix('bs_bo',dtype = floatX)
+
+        X = theano.shared(_X,'X_bo')
+        Y = theano.shared(_Y,'X_bo')
+        
+        loss_outputs = compute_mean_squared_outputs(X,Y,Ws,Us,bs,
+                                                    self.c0s,self.h0s,
+                                                    self.ns,self.ms)
+        
+        loss = theano.function(inputs = [Ws,Us,bs],
+                               outputs = loss_outputs)
+        
+        (dWs,dUs,dbs) = theano.grad(loss_outputs,[Ws,Us,bs])
+        
+        grad_loss = theano.function(inputs = [Ws,Us,bs],
+                                    outputs = [dWs,dUs,dbs])
+        
+        # function for assembling and disassembling matrix weights
+        # from flattened weights
+        
+        def disassemble(x,ms,ns) : 
+            
+            Ws = np.zeros((self.n_layers,4*self.max_m,self.max_n))
+            Us = np.zeros((self.n_layers,4*self.max_m,self.max_m))
+            bs = np.zeros((self.n_layers,4*self.max_m))
+             
+            nn_0 = 0            
+            
+            for i in range(self.n_layers) : 
+                
+                nn_1 = nn_0+4*ms[i]*ns[i]
+                nn_2 = nn_1+4*ms[i]*ms[i]
+
+                Ws[i,:4*ms[i],:ns[i]] = x[nn_0:nn_1].reshape(4*ms[i],ns[i])
+                Us[i,:4*ms[i],:ms[i]] = x[nn_1:nn_2].reshape(4*ms[i],ms[i])
+                
+                nn_0 = nn_2 + 4*ms[i]
+                bs[i,:4*ms[i]] = x[nn_2:nn_0]
+                
+            return (Ws,Us,bs)
+            
+        def assemble(Ws,Us,bs,ms,ns) : 
+            
+            result = np.array([])
+
+            for i in range(self.n_layers) : 
+
+                Dx = np.concatenate((Ws[i,:4*ms[i],:ns[i]].flatten(),
+                                     Us[i,:4*ms[i],:ms[i]].flatten(),
+                                     bs[i,:4*ms[i]].flatten()))
+                
+                result = np.concatenate((result,Dx))
+            
+            return result
+            
+        # define the objective an jacobian
+        
+        def objective(x,ms,ns) : 
+            
+            return loss(*disassemble(x,ms,ns))
+            
+        def jac(x,ms,ns) : 
+            
+            dWs,dUs,dbs = grad_loss(*disassemble(x,ms,ns))
+            
+            return assemble(dWs,dUs,dbs,ms,ns)
+            
+        # run the optimization
+            
+        ms = self.ms.get_value()
+        ns = self.ns.get_value()
+
+        x0 = assemble(self.Ws.get_value(),
+                      self.Us.get_value(),
+                      self.bs.get_value(),
+                      ms,ns)
+
+        opt_res = minimize(objective,
+                           x0,
+                           (ms,ns),
+                           'L-BFGS-B',
+                           jac,
+                           tol = tol)
+        
+        # collect the optimal weights
+        
+        Ws_opt,Us_opt,bs_opt = disassemble(opt_res.x,ms,ns)
+
+        return [opt_res, Ws_opt, Us_opt, bs_opt]
